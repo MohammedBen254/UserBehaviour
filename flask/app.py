@@ -10,19 +10,19 @@ CORS(app)
 DB_FILE = "test.db"
 # ...existing code...
 
-def init_db():
+def init_db(drop_existing=True):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-
-    c.executescript('''
-        DROP TABLE IF EXISTS "User";
-        DROP TABLE IF EXISTS "Session";
-        DROP TABLE IF EXISTS EventType;
-        DROP TABLE IF EXISTS Event;
-        DROP TABLE IF EXISTS PageView;
-        DROP TABLE IF EXISTS Click;
-        DROP TABLE IF EXISTS UserNeed;
-    ''')
+    if drop_existing:
+        c.executescript('''
+            DROP TABLE IF EXISTS "User";
+            DROP TABLE IF EXISTS "Session";
+            DROP TABLE IF EXISTS EventType;
+            DROP TABLE IF EXISTS Event;
+            DROP TABLE IF EXISTS PageView;
+            DROP TABLE IF EXISTS Click;
+            DROP TABLE IF EXISTS UserNeed;
+        ''')
 
     c.executescript("""
         CREATE TABLE "User" (
@@ -81,6 +81,24 @@ def init_db():
         );
 
         INSERT INTO EventType (event_type_id) VALUES ('page_view'), ('click'), ('user_need');
+   
+        CREATE VIEW UserActivitySummary AS 
+        SELECT 
+            u.user_id,
+            u.created_at,
+            COUNT(DISTINCT p.event_id) AS num_visited_pages,
+            GROUP_CONCAT(DISTINCT p.url) AS visited_urls,
+            COUNT(c.event_id) AS num_clicks,
+            SUM(CASE WHEN c.tag = 'button' OR c.tag = 'a' THEN 1 ELSE 0 END) AS num_button_clicks,
+            (JULIANDAY(MAX(e.timestamp)) - JULIANDAY(MIN(e.timestamp))) * 24 * 60 * 60 AS time_on_site_seconds, 
+            GROUP_CONCAT(DISTINCT un.message) AS user_needs
+        FROM "User" u
+        LEFT JOIN "Session" s ON u.user_id = s.user_id
+        LEFT JOIN "Event" e ON s.session_id = e.session_id
+        LEFT JOIN "PageView" p ON e.event_id = p.event_id AND e.event_type_id = 'page_view'
+        LEFT JOIN "Click" c ON e.event_id = c.event_id AND e.event_type_id = 'click'
+        LEFT JOIN "UserNeed" un ON e.event_id = un.event_id AND e.event_type_id = 'user_need'
+        GROUP BY u.user_id, u.created_at;
     """)
 
     conn.commit()
